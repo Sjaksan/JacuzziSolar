@@ -1,0 +1,51 @@
+name: Deploy to Raspberry Pi
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-raspberry
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.RPI_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.RPI_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Prepare app directory on Raspberry Pi
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.RPI_USER }}@${{ secrets.RPI_HOST }}" \
+            "mkdir -p '${{ secrets.RPI_APP_DIR }}'"
+
+      - name: Sync files to Raspberry Pi
+        shell: bash
+        run: |
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'node_modules' \
+            --exclude 'history.db' \
+            --exclude '*.log' \
+            -e "ssh -i ~/.ssh/id_ed25519" \
+            ./ "${{ secrets.RPI_USER }}@${{ secrets.RPI_HOST }}:${{ secrets.RPI_APP_DIR }}/"
+
+      - name: Run remote install/update script
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.RPI_USER }}@${{ secrets.RPI_HOST }}" \
+            "sudo bash '${{ secrets.RPI_APP_DIR }}/deploy/update-on-pi.sh' '${{ secrets.RPI_APP_DIR }}' '${{ secrets.RPI_APP_USER }}' '${{ secrets.RPI_APP_GROUP }}'"

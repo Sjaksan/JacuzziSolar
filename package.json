@@ -1,0 +1,22 @@
+{
+  "name": "jacuzzi-solar",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "gpio:check": "node -e \"const gpio=require('./src/gpio');console.log(JSON.stringify(gpio.getGpioStatus(),null,2));\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.18.1",
+    "sqlite3": "^6.0.1"
+  },
+  "optionalDependencies": {
+    "ads1x15": "^1.2.0",
+    "onoff": "^6.0.3"
+  }
+}
