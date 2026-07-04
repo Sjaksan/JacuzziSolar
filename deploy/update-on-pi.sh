@@ -28,6 +28,10 @@ if ! command -v gpiodetect >/dev/null 2>&1 || ! command -v gpioset >/dev/null 2>
   apt-get install -y gpiod
 fi
 
+echo "Native build-afhankelijkheden controleren..."
+apt-get update
+apt-get install -y build-essential python3 make g++ git
+
 if [ -f "package-lock.json" ]; then
   echo "package-lock.json gevonden, clean install starten..."
   UV_THREADPOOL_SIZE=1 npm ci --omit=dev --no-audit --no-fund
@@ -35,6 +39,8 @@ else
   echo "Geen package-lock.json gevonden, reguliere installatie starten..."
   UV_THREADPOOL_SIZE=1 npm install --omit=dev --no-audit --no-fund
 fi
+
+npm rebuild sqlite3 --build-from-source
 
 chown -R "$APP_USER":"$APP_GROUP" "$APP_DIR"
 
