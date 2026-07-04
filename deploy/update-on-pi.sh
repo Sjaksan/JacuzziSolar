@@ -1,15 +1,3 @@
-# Zorg eerst dat je in de juiste projectmap staat!
-cd "${1}" # Dit gebruikt de RPI_APP_DIR die GitHub Actions meegeeft
-
-# Voer de installatie uit met een fallback en single-core beperking voor de compiler
-if [ -f "package-lock.json" ]; then
-    echo "package-lock.json gevonden, clean install starten..."
-    UV_THREADPOOL_SIZE=1 npm ci --omit=dev
-else
-    echo "Geen package-lock.json gevonden, reguliere installatie starten..."
-    UV_THREADPOOL_SIZE=1 npm install --omit=dev --no-audit --no-fund
-fi
-
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -29,11 +17,23 @@ fi
 
 cd "$APP_DIR"
 
-if command -v npm >/dev/null 2>&1; then
-  npm ci --omit=dev --no-audit --no-fund
-else
+if ! command -v npm >/dev/null 2>&1; then
   echo "npm niet gevonden. Installeer Node.js en npm eerst op de Raspberry Pi."
   exit 1
+fi
+
+if ! command -v gpiodetect >/dev/null 2>&1 || ! command -v gpioset >/dev/null 2>&1; then
+  echo "gpiod-tools niet gevonden. Installeren..."
+  apt-get update
+  apt-get install -y gpiod
+fi
+
+if [ -f "package-lock.json" ]; then
+  echo "package-lock.json gevonden, clean install starten..."
+  UV_THREADPOOL_SIZE=1 npm ci --omit=dev --no-audit --no-fund
+else
+  echo "Geen package-lock.json gevonden, reguliere installatie starten..."
+  UV_THREADPOOL_SIZE=1 npm install --omit=dev --no-audit --no-fund
 fi
 
 chown -R "$APP_USER":"$APP_GROUP" "$APP_DIR"
