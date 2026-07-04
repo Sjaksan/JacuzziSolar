@@ -22,7 +22,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.RPI_SSH_KEY }}" > ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "${{ secrets.RPI_HOST }}" >> ~/.ssh/known_hosts
 
