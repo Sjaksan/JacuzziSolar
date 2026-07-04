@@ -52,4 +52,12 @@ jobs:
         shell: bash
         run: |
           ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=~/.ssh/known_hosts "${{ secrets.RPI_USER }}@${{ secrets.RPI_HOST }}" \
-            "sudo bash '${{ secrets.RPI_APP_DIR }}/deploy/update-on-pi.sh' '${{ secrets.RPI_APP_DIR }}' '${{ secrets.RPI_APP_USER }}' '${{ secrets.RPI_APP_GROUP }}'"
+            "
+            # 1. Haal de actieve Node-versie van NVM op om het absolute pad te bepalen
+            export NVM_DIR=\"\$HOME/.nvm\"
+            [ -s \"\$NVM_DIR/nvm.sh\" ] && \. \"\$NVM_DIR/nvm.sh\"
+            NODE_BIN_DIR=\$(dirname \$(which node))
+            
+            # 2. Voeg dit absolute pad toe aan de PATH variabele, ook tijdens de sudo-omgeving
+            sudo PATH=\"\$NODE_BIN_DIR:\$PATH\" bash '${{ secrets.RPI_APP_DIR }}/deploy/update-on-pi.sh' '${{ secrets.RPI_APP_DIR }}' '${{ secrets.RPI_APP_USER }}' '${{ secrets.RPI_APP_GROUP }}'
+            "
