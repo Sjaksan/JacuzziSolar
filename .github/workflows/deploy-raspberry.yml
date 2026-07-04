@@ -21,15 +21,19 @@ jobs:
       - name: Setup SSH key
         shell: bash
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          install -d -m 700 ~/.ssh
+          cat > ~/.ssh/id_ed25519 <<'EOF'
+          ${{ secrets.SSH_PRIVATE_KEY }}
+          EOF
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "${{ secrets.RPI_HOST }}" >> ~/.ssh/known_hosts
+          if [[ -n "${{ secrets.RPI_HOST }}" ]]; then
+            ssh-keyscan -H "${{ secrets.RPI_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
 
       - name: Prepare app directory on Raspberry Pi
         shell: bash
         run: |
-          ssh -i ~/.ssh/id_ed25519 "${{ secrets.RPI_USER }}@${{ secrets.RPI_HOST }}" \
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=~/.ssh/known_hosts "${{ secrets.RPI_USER }}@${{ secrets.RPI_HOST }}" \
             "mkdir -p '${{ secrets.RPI_APP_DIR }}'"
 
       - name: Sync files to Raspberry Pi
@@ -41,11 +45,11 @@ jobs:
             --exclude 'node_modules' \
             --exclude 'history.db' \
             --exclude '*.log' \
-            -e "ssh -i ~/.ssh/id_ed25519" \
+            -e "ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=~/.ssh/known_hosts" \
             ./ "${{ secrets.RPI_USER }}@${{ secrets.RPI_HOST }}:${{ secrets.RPI_APP_DIR }}/"
 
       - name: Run remote install/update script
         shell: bash
         run: |
-          ssh -i ~/.ssh/id_ed25519 "${{ secrets.RPI_USER }}@${{ secrets.RPI_HOST }}" \
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=~/.ssh/known_hosts "${{ secrets.RPI_USER }}@${{ secrets.RPI_HOST }}" \
             "sudo bash '${{ secrets.RPI_APP_DIR }}/deploy/update-on-pi.sh' '${{ secrets.RPI_APP_DIR }}' '${{ secrets.RPI_APP_USER }}' '${{ secrets.RPI_APP_GROUP }}'"
