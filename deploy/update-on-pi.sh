@@ -1,3 +1,5 @@
+export PATH="/home/sjaksan/.nvm/versions/node/v20.18.3/bin:$PATH"
+
 #!/usr/bin/env bash
 set -euo pipefail
 

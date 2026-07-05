@@ -59,9 +59,16 @@ function writeWithGpiod(pinNumber, value, activeLow = false) {
   }
 
   const effectiveValue = activeLow ? (value ? 0 : 1) : value;
-  execFileSync("gpioset", [gpioChip, `${pinNumber}=${effectiveValue}`], {
-    stdio: "ignore",
-  });
+
+  try {
+    execFileSync("gpioset", [gpioChip, `${pinNumber}=${effectiveValue}`], {
+      stdio: "ignore",
+    });
+  } catch (error) {
+    loadError = error;
+    gpioAvailable = false;
+  }
+
   return undefined;
 }
 
@@ -94,7 +101,12 @@ function createOutputPin(pinNumber, initialValue = 0, options = {}) {
     options,
   };
 
-  pin.writeSync(initialValue);
+  try {
+    pin.writeSync(initialValue);
+  } catch (error) {
+    pin.isMock = true;
+  }
+
   return pin;
 }
 
