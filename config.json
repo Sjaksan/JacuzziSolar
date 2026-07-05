@@ -1,3 +1,12 @@
 {
-  "p1Ip": "192.168.1.171"
+  "p1Ip": "192.168.1.170",
+  "heaterSensorEnabled": false,
+  "heaterCurrentThresholdA": 1,
+  "lineVoltageV": 230,
+  "ads1115I2cBus": 1,
+  "ads1115Address": 72,
+  "ads1115Channel": 0,
+  "sctMilliVoltsPerAmp": 10,
+  "exportThresholdW": 300,
+  "importThresholdW": 350
 }

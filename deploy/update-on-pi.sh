@@ -42,7 +42,26 @@ else
   UV_THREADPOOL_SIZE=1 npm install --omit=dev --no-audit --no-fund
 fi
 
-npm rebuild sqlite3 --build-from-source
+if [[ "${FORCE_SQLITE_REBUILD:-0}" == "1" ]]; then
+  echo "FORCE_SQLITE_REBUILD=1, sqlite3 wordt geforceerd opnieuw gebouwd..."
+  npm rebuild sqlite3 --build-from-source
+elif node -e "
+  const fs = require('fs');
+  const path = require('path');
+  const sqlite3Path = path.join(process.cwd(), 'node_modules', 'sqlite3');
+  const bindingPath = path.join(sqlite3Path, 'lib', 'binding', 'node-v' + process.versions.modules + '-' + process.platform + '-' + process.arch, 'node_sqlite3.node');
+  if (!fs.existsSync(bindingPath)) {
+    console.error('missing');
+    process.exit(1);
+  }
+  require('sqlite3');
+  console.log('sqlite3 ok');
+" >/dev/null 2>&1; then
+  echo "sqlite3 native binding werkt al; rebuild overgeslagen."
+else
+  echo "sqlite3 native binding ontbreekt of is onbruikbaar; rebuild vanaf broncode..."
+  npm rebuild sqlite3 --build-from-source
+fi
 
 chown -R "$APP_USER":"$APP_GROUP" "$APP_DIR"
 

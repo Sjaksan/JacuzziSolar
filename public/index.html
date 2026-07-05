@@ -280,6 +280,10 @@
       <form id="settingsForm">
         <label for="p1Ip">P1 IP-adres</label>
         <input id="p1Ip" name="p1Ip" type="text" placeholder="Bijv. 192.168.1.171" required>
+        <label for="exportThresholdW">Drempel voor zonnesurplus (W)</label>
+        <input id="exportThresholdW" name="exportThresholdW" type="number" step="50" placeholder="-1500">
+        <label for="importThresholdW">Drempel voor weinig zonnesurplus (W)</label>
+        <input id="importThresholdW" name="importThresholdW" type="number" step="50" placeholder="1500">
         <button type="submit">Opslaan</button>
       </form>
       <div class="status" id="saveStatus"></div>
@@ -294,6 +298,8 @@
     const heaterValue = document.getElementById('heaterValue');
     const heaterSub = document.getElementById('heaterSub');
     const p1IpInput = document.getElementById('p1Ip');
+    const exportThresholdWInput = document.getElementById('exportThresholdW');
+    const importThresholdWInput = document.getElementById('importThresholdW');
     const settingsForm = document.getElementById('settingsForm');
     const saveStatus = document.getElementById('saveStatus');
     const rangeSelect = document.getElementById('rangeSelect');
@@ -315,6 +321,8 @@
       }
       const data = await response.json();
       p1IpInput.value = data.p1Ip || '';
+      exportThresholdWInput.value = data.exportThresholdW ?? '';
+      importThresholdWInput.value = data.importThresholdW ?? '';
     }
 
     function formatPower(power) {
@@ -331,10 +339,10 @@
       feedValue.textContent = feed === null ? '-' : feed + ' W';
       powerSub.textContent = 'Laatste meting: ' + formatPower(power);
 
-      relayValue.textContent = data.relayEnabled ? 'AAN' : 'UIT';
+      relayValue.textContent = data.relayEnabled ? 'Pauze' : 'Actief';
       relayPill.textContent = data.relayEnabled
-        ? 'Relais ingeschakeld (begrenzen)'
-        : 'Relais uit (extra opwarmen)';
+        ? 'Extra verwarming gepauzeerd'
+        : 'Extra verwarming actief met zonnesurplus';
       relayPill.className = data.relayEnabled ? 'pill on' : 'pill';
 
       if (data.heaterSensorAvailable) {
@@ -461,7 +469,11 @@
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ p1Ip: p1IpInput.value.trim() })
+          body: JSON.stringify({
+          p1Ip: p1IpInput.value.trim(),
+          exportThresholdW: Number(exportThresholdWInput.value),
+          importThresholdW: Number(importThresholdWInput.value)
+        })
         });
 
         if (!response.ok) {

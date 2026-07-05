@@ -14,10 +14,10 @@ if (!gpioStatus.enabled) {
 }
 const jacuzziRelais = createOutputPin(17, 1);
 
-const EXPORT_THRESHOLD = -200; // Start met opwarmen bij >200 Watt teruglevering (negatief in P1)
-const IMPORT_THRESHOLD = 200;   // Stop met extra opwarmen als we stroom gaan inkopen
 const CHECK_INTERVAL = 60000;   // Check elke 60 seconden (60000 ms)
-const WEB_PORT = Number(process.env.WEB_PORT || 3000);
+const DEFAULT_EXPORT_THRESHOLD_W = Number(process.env.EXPORT_THRESHOLD_W || 1500);
+const DEFAULT_IMPORT_THRESHOLD_W = Number(process.env.IMPORT_THRESHOLD_W || 1500);
+const WEB_PORT = Number(process.env.WEB_PORT || (process.env.NODE_ENV === 'production' ? 80 : 3000));
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const UI_PATH = path.join(__dirname, 'public', 'index.html');
 const historyStore = new HistoryStore();
@@ -31,6 +31,8 @@ const DEFAULT_CONFIG = {
     ads1115Address: Number(process.env.ADS1115_ADDRESS || 0x48),
     ads1115Channel: Number(process.env.ADS1115_CHANNEL || 0),
     sctMilliVoltsPerAmp: Number(process.env.SCT_MV_PER_AMP || 10),
+    exportThresholdW: Number(process.env.EXPORT_THRESHOLD_W || 1500),
+    importThresholdW: Number(process.env.IMPORT_THRESHOLD_W || 1500),
 };
 
 const runtimeState = {
@@ -164,14 +166,15 @@ async function checkSolarSurplus() {
         
         console.log(`[${new Date().toLocaleTimeString()}] Huidig vermogen: ${activePower}W`);
 
+        const exportThresholdW = -Math.abs(Number(config.exportThresholdW ?? DEFAULT_EXPORT_THRESHOLD_W));
+        const importThresholdW = Math.abs(Number(config.importThresholdW ?? DEFAULT_IMPORT_THRESHOLD_W));
+
         // 2. Logica voor het relais
-        if (activePower <= EXPORT_THRESHOLD) {
-            // Veel zon! Relais UIT = Jacuzzi ziet echte temp en warmt door naar 40°C
-            await setRelayState(false, 'Zon schijnt! Jacuzzi mag extra opwarmen. Relais UIT.');
-        } 
-        else if (activePower >= IMPORT_THRESHOLD) {
-            // Geen zon / hoog verbruik in huis. Relais AAN = Jacuzzi foppen (stopt bij 38°C)
-            await setRelayState(true, 'Te weinig zon. Jacuzzi begrenzen. Relais AAN.');
+        if (activePower <= exportThresholdW) {
+            await setRelayState(false, `Zonnesurplus gedetecteerd (${activePower}W). De jacuzzi wordt extra verwarmd met zonnesurplus.`);
+        }
+        else if (activePower >= importThresholdW) {
+            await setRelayState(true, `Te weinig zonnesurplus (${activePower}W). De extra verwarming wordt gepauzeerd.`);
         }
 
         await logMeasurement('p1');
@@ -181,8 +184,8 @@ async function checkSolarSurplus() {
         runtimeState.lastCheckAt = new Date().toISOString();
         runtimeState.lastError = error.message;
         console.error("Fout bij het uitlezen van de P1 meter:", error.message);
-        // Veiligheidsmaatregel: bij fouten, zet het relais AAN zodat de jacuzzi niet onnodig stroom vreet
-        await setRelayState(true, 'Veiligheidsmodus actief. Relais AAN.');
+        // Veiligheidsmaatregel: bij fouten, pauzeer de extra verwarming zodat de jacuzzi niet onnodig stroom verbruikt.
+        await setRelayState(true, 'Veiligheidsmodus actief. De extra verwarming wordt gepauzeerd.');
         await logMeasurement('p1_error', error.message);
     }
 }
@@ -230,6 +233,8 @@ function getStatusPayload() {
         heaterSensorAvailable: runtimeState.heaterSensorAvailable,
         heaterSensorReason: runtimeState.heaterSensorReason,
         p1Ip: config.p1Ip,
+        exportThresholdW: config.exportThresholdW ?? DEFAULT_EXPORT_THRESHOLD_W,
+        importThresholdW: config.importThresholdW ?? DEFAULT_IMPORT_THRESHOLD_W,
         gpioEnabled: gpioStatus.enabled,
     };
 }
@@ -274,6 +279,8 @@ const server = http.createServer(async (req, res) => {
                 ads1115I2cBus: config.ads1115I2cBus,
                 ads1115Address: config.ads1115Address,
                 ads1115Channel: config.ads1115Channel,
+                exportThresholdW: config.exportThresholdW ?? DEFAULT_EXPORT_THRESHOLD_W,
+                importThresholdW: config.importThresholdW ?? DEFAULT_IMPORT_THRESHOLD_W,
             });
             return;
         }
@@ -295,20 +302,29 @@ const server = http.createServer(async (req, res) => {
             const rawBody = await readRequestBody(req);
             const payload = JSON.parse(rawBody || '{}');
             const nextIp = String(payload.p1Ip || '').trim();
+            const nextExportThresholdW = Number(payload.exportThresholdW);
+            const nextImportThresholdW = Number(payload.importThresholdW);
 
             if (!isValidIpAddress(nextIp)) {
                 sendJson(res, 400, { error: 'Ongeldig IP-adres.' });
                 return;
             }
 
+            if (!Number.isFinite(nextExportThresholdW) || !Number.isFinite(nextImportThresholdW)) {
+                sendJson(res, 400, { error: 'Ongeldige drempelwaarden.' });
+                return;
+            }
+
             config = {
                 ...config,
                 p1Ip: nextIp,
+                exportThresholdW: nextExportThresholdW,
+                importThresholdW: nextImportThresholdW,
             };
 
             saveConfig(config);
             await checkSolarSurplus();
-            sendJson(res, 200, { ok: true, p1Ip: config.p1Ip });
+            sendJson(res, 200, { ok: true, p1Ip: config.p1Ip, exportThresholdW: config.exportThresholdW, importThresholdW: config.importThresholdW });
             return;
         }
 
