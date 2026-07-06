@@ -7,6 +7,6 @@
   "ads1115Address": 72,
   "ads1115Channel": 0,
   "sctMilliVoltsPerAmp": 10,
-  "exportThresholdW": 300,
-  "importThresholdW": 350
+  "exportThresholdW": 50,
+  "importThresholdW": 50
 }

@@ -6,6 +6,7 @@ const runtimePlatform = process.platform;
 let gpioChip = null;
 let gpioAvailable = false;
 let loadError = null;
+let gpioBackend = null;
 
 function hasCommand(command) {
   try {
@@ -20,7 +21,10 @@ function hasCommand(command) {
 
 if (runtimePlatform === "linux") {
   try {
-    if (hasCommand("gpiodetect") && hasCommand("gpioset")) {
+    if (hasCommand("pinctrl")) {
+      gpioBackend = "pinctrl";
+      gpioAvailable = true;
+    } else if (hasCommand("gpiodetect") && hasCommand("gpioset")) {
       const detectOutput = execFileSync("gpiodetect", {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
@@ -31,10 +35,12 @@ if (runtimePlatform === "linux") {
         const [chipName] = firstLine.trim().split(/\s+/);
         gpioChip = chipName;
         gpioAvailable = Boolean(chipName);
+        gpioBackend = gpioAvailable ? "gpiod" : null;
       }
     } else if (fs.existsSync("/dev/gpiochip0")) {
       gpioChip = "gpiochip0";
       gpioAvailable = true;
+      gpioBackend = "gpiod";
     }
   } catch (error) {
     loadError = error;
@@ -45,7 +51,7 @@ function getGpioStatus() {
   return {
     enabled: gpioAvailable,
     platform: runtimePlatform,
-    backend: "gpiod",
+    backend: gpioBackend,
     reason: gpioAvailable
       ? null
       : "GPIO is disabled outside Linux runtime or gpiod tools are unavailable.",
@@ -53,15 +59,35 @@ function getGpioStatus() {
   };
 }
 
+function writeWithPinCtrl(pinNumber, value, activeLow = false) {
+  if (!gpioAvailable || gpioBackend !== "pinctrl") {
+    return undefined;
+  }
+
+  const effectiveValue = activeLow ? (value ? 0 : 1) : value;
+  const level = effectiveValue ? "dh" : "dl";
+
+  try {
+    execFileSync("pinctrl", ["set", String(pinNumber), "op", level], {
+      stdio: "ignore",
+    });
+  } catch (error) {
+    loadError = error;
+    gpioAvailable = false;
+  }
+
+  return undefined;
+}
+
 function writeWithGpiod(pinNumber, value, activeLow = false) {
-  if (!gpioAvailable || !gpioChip) {
+  if (!gpioAvailable || gpioBackend !== "gpiod" || !gpioChip) {
     return undefined;
   }
 
   const effectiveValue = activeLow ? (value ? 0 : 1) : value;
 
   try {
-    execFileSync("gpioset", [gpioChip, `${pinNumber}=${effectiveValue}`], {
+    execFileSync("gpioset", ["-m", "exit", gpioChip, `${pinNumber}=${effectiveValue}`], {
       stdio: "ignore",
     });
   } catch (error) {
@@ -90,6 +116,9 @@ function createOutputPin(pinNumber, initialValue = 0, options = {}) {
 
   const pin = {
     writeSync(value) {
+      if (gpioBackend === "pinctrl") {
+        return writeWithPinCtrl(pinNumber, value, Boolean(options.activeLow));
+      }
       return writeWithGpiod(pinNumber, value, Boolean(options.activeLow));
     },
     unexport() {

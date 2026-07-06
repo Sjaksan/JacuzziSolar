@@ -12,7 +12,9 @@ const gpioStatus = getGpioStatus();
 if (!gpioStatus.enabled) {
     console.warn(`GPIO niet beschikbaar (${gpioStatus.reason}). Draaiend in veilige mock-modus.`);
 }
-const jacuzziRelais = createOutputPin(17, 1);
+// De regel-logica gebruikt false = extra verwarming aan en true = gepauzeerd.
+// Met de relay-jumper op H (active-high) inverteren we het GPIO-signaal in software.
+const jacuzziRelais = createOutputPin(17, 1, { activeLow: true });
 
 const CHECK_INTERVAL = 60000;   // Check elke 60 seconden (60000 ms)
 const DEFAULT_EXPORT_THRESHOLD_W = Number(process.env.EXPORT_THRESHOLD_W || 1500);
