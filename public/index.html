@@ -11,6 +11,12 @@
       --ink: #1a2a2a;
       --accent: #0f7c80;
       --accent-soft: #d4efef;
+      --solar-glow-color: 255, 196, 120;
+      --solar-glow-strength: 0.42;
+      --solar-glow-size: 38%;
+      --solar-beam-color: 255, 120, 34;
+      --solar-beam-strength: 0;
+      --solar-beam-size: 0%;
       --warn: #b94a00;
       --good: #1b6e35;
       --shadow: 0 10px 35px rgba(15, 31, 31, 0.12);
@@ -25,10 +31,13 @@
       color: var(--ink);
       background:
         radial-gradient(circle at 15% -10%, #dbf2ef 0%, transparent 42%),
-        radial-gradient(circle at 90% 10%, #ffeed6 0%, transparent 34%),
+        radial-gradient(circle at 88% 12%, rgba(var(--solar-glow-color), var(--solar-glow-strength)) 0%, transparent var(--solar-glow-size)),
+        radial-gradient(circle at 100% 0%, rgba(var(--solar-beam-color), var(--solar-beam-strength)) 0%, transparent var(--solar-beam-size)),
+        linear-gradient(135deg, rgba(255, 157, 66, calc(var(--solar-beam-strength) * 0.38)) 0%, transparent 42%),
         var(--bg);
       min-height: 100vh;
       padding: 28px 16px;
+      transition: background 0.5s ease;
     }
 
     .shell {
@@ -182,6 +191,25 @@
     .status.ok { color: var(--good); }
     .status.err { color: #9c2d2d; }
 
+    .relay-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .relay-controls button {
+      flex: 1 1 160px;
+    }
+
+    .relay-controls button.secondary {
+      background: #456d6f;
+    }
+
+    .relay-controls button.warn {
+      background: #b94a00;
+    }
+
     .chart-card {
       display: grid;
       gap: 10px;
@@ -249,6 +277,7 @@
         <p class="label">Relais</p>
         <p class="value" id="relayValue">-</p>
         <p class="sub"><span class="pill" id="relayPill">Status onbekend</span></p>
+        <p class="sub" id="relayModeSub">Bediening: -</p>
       </article>
 
       <article class="card">
@@ -286,6 +315,11 @@
         <input id="importThresholdW" name="importThresholdW" type="number" step="50" placeholder="1500">
         <button type="submit">Opslaan</button>
       </form>
+      <div class="relay-controls">
+        <button type="button" id="relayAutoButton" class="secondary">Automatisch</button>
+        <button type="button" id="relayOnButton">Extra verwarming aan</button>
+        <button type="button" id="relayOffButton" class="warn">Extra verwarming pauze</button>
+      </div>
       <div class="status" id="saveStatus"></div>
     </details>
   </main>
@@ -297,6 +331,10 @@
     const relayPill = document.getElementById('relayPill');
     const heaterValue = document.getElementById('heaterValue');
     const heaterSub = document.getElementById('heaterSub');
+    const relayModeSub = document.getElementById('relayModeSub');
+    const relayAutoButton = document.getElementById('relayAutoButton');
+    const relayOnButton = document.getElementById('relayOnButton');
+    const relayOffButton = document.getElementById('relayOffButton');
     const p1IpInput = document.getElementById('p1Ip');
     const exportThresholdWInput = document.getElementById('exportThresholdW');
     const importThresholdWInput = document.getElementById('importThresholdW');
@@ -332,9 +370,36 @@
       return power + ' W';
     }
 
+    function updateSolarGlow(feedInW) {
+      const glowMaxW = 4000;
+      const ratio = typeof feedInW === 'number'
+        ? Math.max(0, Math.min(1, feedInW / glowMaxW))
+        : 0;
+
+      const red = Math.round(255);
+      const green = Math.round(196 - (ratio * 86));
+      const blue = Math.round(120 - (ratio * 106));
+      const strength = (0.42 + (ratio * 0.42)).toFixed(2);
+      const size = (38 + (ratio * 22)).toFixed(0) + '%';
+      const beamRed = Math.round(255);
+      const beamGreen = Math.round(120 - (ratio * 28));
+      const beamBlue = Math.round(34 - (ratio * 20));
+      const beamStrength = (ratio * 0.48).toFixed(2);
+      const beamSize = (18 + (ratio * 26)).toFixed(0) + '%';
+
+      document.documentElement.style.setProperty('--solar-glow-color', `${red}, ${green}, ${blue}`);
+      document.documentElement.style.setProperty('--solar-glow-strength', strength);
+      document.documentElement.style.setProperty('--solar-glow-size', size);
+      document.documentElement.style.setProperty('--solar-beam-color', `${beamRed}, ${beamGreen}, ${beamBlue}`);
+      document.documentElement.style.setProperty('--solar-beam-strength', beamStrength);
+      document.documentElement.style.setProperty('--solar-beam-size', beamSize);
+    }
+
     function renderStatus(data) {
       const power = typeof data.activePowerW === 'number' ? data.activePowerW : null;
       const feed = typeof data.feedInW === 'number' ? data.feedInW : null;
+
+      updateSolarGlow(feed);
 
       feedValue.textContent = feed === null ? '-' : feed + ' W';
       powerSub.textContent = 'Laatste meting: ' + formatPower(power);
@@ -344,6 +409,7 @@
         ? 'Extra verwarming gepauzeerd'
         : 'Extra verwarming actief met zonnesurplus';
       relayPill.className = data.relayEnabled ? 'pill on' : 'pill';
+      relayModeSub.textContent = 'Bediening: ' + (data.relayControlModeLabel || 'Onbekend');
 
       if (data.heaterSensorAvailable) {
         heaterValue.textContent = data.heaterOn ? 'AAN' : 'UIT';
@@ -351,6 +417,41 @@
       } else {
         heaterValue.textContent = 'N/A';
         heaterSub.textContent = data.heaterSensorReason || 'Sensor niet beschikbaar';
+      }
+    }
+
+    async function setRelayMode(mode, relayEnabled) {
+      setStatusMessage('Relais wordt bijgewerkt...', '');
+
+      try {
+        const payload = { mode };
+        if (mode === 'manual') {
+          payload.relayEnabled = relayEnabled;
+        }
+
+        const response = await fetch('/api/relay', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const errorPayload = await response.json().catch(() => ({}));
+          throw new Error(errorPayload.error || 'Relais kon niet worden bijgewerkt');
+        }
+
+        const data = await response.json();
+        renderStatus(data);
+        setStatusMessage(
+          mode === 'auto'
+            ? 'Relais staat weer in automatische modus.'
+            : (relayEnabled ? 'Relais handmatig gepauzeerd.' : 'Relais handmatig ingeschakeld.'),
+          'ok'
+        );
+      } catch (error) {
+        setStatusMessage(error.message, 'err');
       }
     }
 
@@ -491,6 +592,18 @@
 
     rangeSelect.addEventListener('change', () => {
       refreshHistory();
+    });
+
+    relayAutoButton.addEventListener('click', () => {
+      setRelayMode('auto');
+    });
+
+    relayOnButton.addEventListener('click', () => {
+      setRelayMode('manual', false);
+    });
+
+    relayOffButton.addEventListener('click', () => {
+      setRelayMode('manual', true);
     });
 
     (async function init() {

@@ -40,6 +40,7 @@ const DEFAULT_CONFIG = {
 const runtimeState = {
     activePowerW: null,
     relayEnabled: true,
+    relayControlMode: 'auto',
     lastCheckAt: null,
     lastError: null,
     heaterCurrentA: null,
@@ -146,6 +147,10 @@ async function setRelayState(enableRelay, reason) {
     }
 }
 
+function getRelayModeLabel() {
+    return runtimeState.relayControlMode === 'manual' ? 'Handmatig' : 'Automatisch';
+}
+
 async function updateHeaterTelemetry() {
     const sensorReading = await heaterSensor.read();
     runtimeState.heaterSensorAvailable = Boolean(sensorReading.available);
@@ -170,6 +175,11 @@ async function checkSolarSurplus() {
 
         const exportThresholdW = -Math.abs(Number(config.exportThresholdW ?? DEFAULT_EXPORT_THRESHOLD_W));
         const importThresholdW = Math.abs(Number(config.importThresholdW ?? DEFAULT_IMPORT_THRESHOLD_W));
+
+        if (runtimeState.relayControlMode === 'manual') {
+            await logMeasurement('p1_manual');
+            return;
+        }
 
         // 2. Logica voor het relais
         if (activePower <= exportThresholdW) {
@@ -227,6 +237,8 @@ function getStatusPayload() {
         activePowerW: power,
         feedInW,
         relayEnabled: runtimeState.relayEnabled,
+        relayControlMode: runtimeState.relayControlMode,
+        relayControlModeLabel: getRelayModeLabel(),
         lastCheckAt: runtimeState.lastCheckAt,
         lastError: runtimeState.lastError,
         heaterCurrentA: runtimeState.heaterCurrentA,
@@ -297,6 +309,30 @@ const server = http.createServer(async (req, res) => {
                 points,
                 relayEvents,
             });
+            return;
+        }
+
+        if (req.method === 'POST' && requestUrl.pathname === '/api/relay') {
+            const rawBody = await readRequestBody(req);
+            const payload = JSON.parse(rawBody || '{}');
+            const nextMode = payload.mode === 'manual' ? 'manual' : 'auto';
+
+            if (nextMode === 'manual') {
+                if (typeof payload.relayEnabled !== 'boolean') {
+                    sendJson(res, 400, { error: 'relayEnabled moet true of false zijn in handmatige modus.' });
+                    return;
+                }
+
+                runtimeState.relayControlMode = 'manual';
+                await setRelayState(payload.relayEnabled, payload.relayEnabled
+                    ? 'Handmatige bediening: extra verwarming gepauzeerd.'
+                    : 'Handmatige bediening: extra verwarming geforceerd actief.');
+            } else {
+                runtimeState.relayControlMode = 'auto';
+                await checkSolarSurplus();
+            }
+
+            sendJson(res, 200, { ok: true, ...getStatusPayload() });
             return;
         }
 
