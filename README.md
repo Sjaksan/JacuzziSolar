@@ -6,6 +6,7 @@ Lichtgewicht Node.js service voor Raspberry Pi met:
 - web dashboard
 - lokale SQLite historie
 - optionele heater detectie via SCT-013 + ADS1115
+- optionele temperatuurmeting via 1-wire (bijv. DS18B20)
 
 ## Start lokaal
 
@@ -42,6 +43,24 @@ i2cdetect -y 1
 4. Controleer of ADS1115 op `0x48` zichtbaar is.
 5. Zet sensor aan in environment:
 - `HEATER_SENSOR_ENABLED=1`
+
+## Temperatuursensor (1-wire, DS18B20)
+
+1. Zet 1-wire aan op je Pi:
+```bash
+sudo raspi-config
+# Interface Options -> 1-Wire -> Enable
+```
+2. Herstart de Pi.
+3. Controleer of je sensor zichtbaar is:
+```bash
+ls /sys/bus/w1/devices
+```
+4. Je moet een map zien zoals `28-xxxxxxxxxxxx`.
+5. Optioneel in environment:
+- `TEMP_SENSOR_ENABLED=1`
+- `TEMP_SENSOR_ID=28-xxxxxxxxxxxx` (specifieke sensor kiezen)
+- `ONE_WIRE_BASE_PATH=/sys/bus/w1/devices`
 
 ## Systemd service installeren
 
@@ -135,3 +154,6 @@ journalctl -u jacuzzi-solar -n 100 --no-pager
 - `ADS1115_ADDRESS=72`
 - `ADS1115_CHANNEL=0`
 - `SCT_MV_PER_AMP=10`
+- `TEMP_SENSOR_ENABLED=1`
+- `TEMP_SENSOR_ID=`
+- `ONE_WIRE_BASE_PATH=/sys/bus/w1/devices`

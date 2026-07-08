@@ -285,6 +285,12 @@
         <p class="value" id="heaterValue">-</p>
         <p class="sub" id="heaterSub">Vermogen: -</p>
       </article>
+
+      <article class="card">
+        <p class="label">Temperatuur</p>
+        <p class="value" id="temperatureValue">-</p>
+        <p class="sub" id="temperatureSub">Actuele meting: -</p>
+      </article>
     </section>
 
     <section class="card chart-card">
@@ -331,6 +337,8 @@
     const relayPill = document.getElementById('relayPill');
     const heaterValue = document.getElementById('heaterValue');
     const heaterSub = document.getElementById('heaterSub');
+    const temperatureValue = document.getElementById('temperatureValue');
+    const temperatureSub = document.getElementById('temperatureSub');
     const relayModeSub = document.getElementById('relayModeSub');
     const relayAutoButton = document.getElementById('relayAutoButton');
     const relayOnButton = document.getElementById('relayOnButton');
@@ -368,6 +376,13 @@
         return '-';
       }
       return power + ' W';
+    }
+
+    function formatTemperature(temperatureC) {
+      if (typeof temperatureC !== 'number') {
+        return '-';
+      }
+      return temperatureC.toFixed(1) + ' °C';
     }
 
     function updateSolarGlow(feedInW) {
@@ -417,6 +432,14 @@
       } else {
         heaterValue.textContent = 'N/A';
         heaterSub.textContent = data.heaterSensorReason || 'Sensor niet beschikbaar';
+      }
+
+      if (data.temperatureSensorAvailable) {
+        temperatureValue.textContent = formatTemperature(data.temperatureC);
+        temperatureSub.textContent = 'Actuele meting';
+      } else {
+        temperatureValue.textContent = 'N/A';
+        temperatureSub.textContent = data.temperatureSensorReason || 'Sensor niet beschikbaar';
       }
     }
 

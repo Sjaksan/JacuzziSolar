@@ -1,5 +1,5 @@
 const DEFAULT_OPTIONS = {
-  enabled: false,
+  enabled: true,
   i2cBusNumber: 1,
   address: 0x48,
   channel: 0,

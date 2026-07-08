@@ -1,6 +1,7 @@
 const { createOutputPin, getGpioStatus } = require('./src/gpio');
 const { HistoryStore } = require('./src/historyStore');
 const { HeaterSensor } = require('./src/heaterSensor');
+const { TemperatureSensor } = require('./src/temperatureSensor');
 const axios = require('axios');
 const http = require('http');
 const fs = require('fs');
@@ -26,6 +27,9 @@ const historyStore = new HistoryStore();
 
 const DEFAULT_CONFIG = {
     p1Ip: process.env.P1_IP || '192.168.1.171',
+    temperatureSensorEnabled: process.env.TEMP_SENSOR_ENABLED !== '0',
+    temperatureSensorId: process.env.TEMP_SENSOR_ID || null,
+    oneWireBasePath: process.env.ONE_WIRE_BASE_PATH || '/sys/bus/w1/devices',
     heaterSensorEnabled: process.env.HEATER_SENSOR_ENABLED === '1',
     heaterCurrentThresholdA: Number(process.env.HEATER_CURRENT_THRESHOLD_A || 1),
     lineVoltageV: Number(process.env.LINE_VOLTAGE_V || 230),
@@ -48,6 +52,9 @@ const runtimeState = {
     heaterOn: null,
     heaterSensorAvailable: false,
     heaterSensorReason: 'Niet geinitialiseerd.',
+    temperatureC: null,
+    temperatureSensorAvailable: false,
+    temperatureSensorReason: 'Niet geinitialiseerd.',
 };
 
 function isValidIpAddress(ip) {
@@ -98,6 +105,11 @@ const heaterSensor = new HeaterSensor({
     mvPerAmp: config.sctMilliVoltsPerAmp,
     lineVoltage: config.lineVoltageV,
     heaterOnThresholdA: config.heaterCurrentThresholdA,
+});
+const temperatureSensor = new TemperatureSensor({
+    enabled: config.temperatureSensorEnabled,
+    sensorId: config.temperatureSensorId,
+    basePath: config.oneWireBasePath,
 });
 
 async function logMeasurement(source, errorMessage = null) {
@@ -160,7 +172,15 @@ async function updateHeaterTelemetry() {
     runtimeState.heaterOn = sensorReading.heaterOn;
 }
 
+async function updateTemperatureTelemetry() {
+    const sensorReading = await temperatureSensor.read();
+    runtimeState.temperatureSensorAvailable = Boolean(sensorReading.available);
+    runtimeState.temperatureSensorReason = sensorReading.reason;
+    runtimeState.temperatureC = sensorReading.temperatureC;
+}
+
 async function checkSolarSurplus() {
+    await updateTemperatureTelemetry();
     await updateHeaterTelemetry();
 
     try {
@@ -246,6 +266,9 @@ function getStatusPayload() {
         heaterOn: runtimeState.heaterOn,
         heaterSensorAvailable: runtimeState.heaterSensorAvailable,
         heaterSensorReason: runtimeState.heaterSensorReason,
+        temperatureC: runtimeState.temperatureC,
+        temperatureSensorAvailable: runtimeState.temperatureSensorAvailable,
+        temperatureSensorReason: runtimeState.temperatureSensorReason,
         p1Ip: config.p1Ip,
         exportThresholdW: config.exportThresholdW ?? DEFAULT_EXPORT_THRESHOLD_W,
         importThresholdW: config.importThresholdW ?? DEFAULT_IMPORT_THRESHOLD_W,
@@ -287,6 +310,9 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'GET' && requestUrl.pathname === '/api/settings') {
             sendJson(res, 200, {
                 p1Ip: config.p1Ip,
+                temperatureSensorEnabled: config.temperatureSensorEnabled,
+                temperatureSensorId: config.temperatureSensorId,
+                oneWireBasePath: config.oneWireBasePath,
                 heaterSensorEnabled: config.heaterSensorEnabled,
                 heaterCurrentThresholdA: config.heaterCurrentThresholdA,
                 lineVoltageV: config.lineVoltageV,
@@ -400,15 +426,24 @@ server.on('error', (error) => {
 async function startApp() {
     await historyStore.init();
     await heaterSensor.init();
+    await temperatureSensor.init();
 
     runtimeState.heaterSensorAvailable = heaterSensor.available;
     runtimeState.heaterSensorReason = heaterSensor.reason;
+    runtimeState.temperatureSensorAvailable = temperatureSensor.available;
+    runtimeState.temperatureSensorReason = temperatureSensor.reason;
 
     console.log("Jacuzzi Solar Optimizer gestart...");
     if (runtimeState.heaterSensorAvailable) {
         console.log('Heater sensor actief via ADS1115/SCT-013.');
     } else {
         console.log(`Heater sensor inactief: ${runtimeState.heaterSensorReason}`);
+    }
+
+    if (runtimeState.temperatureSensorAvailable) {
+        console.log('Temperatuursensor actief via 1-wire.');
+    } else {
+        console.log(`Temperatuursensor inactief: ${runtimeState.temperatureSensorReason}`);
     }
 
     await checkSolarSurplus();
