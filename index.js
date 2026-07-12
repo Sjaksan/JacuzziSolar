@@ -20,6 +20,7 @@ const jacuzziRelais = createOutputPin(17, 1, { activeLow: true });
 const CHECK_INTERVAL = 60000;   // Check elke 60 seconden (60000 ms)
 const DEFAULT_EXPORT_THRESHOLD_W = Number(process.env.EXPORT_THRESHOLD_W || 1500);
 const DEFAULT_IMPORT_THRESHOLD_W = Number(process.env.IMPORT_THRESHOLD_W || 1500);
+const DEFAULT_MAX_TEMPERATURE_C = Number(process.env.TEMP_MAX_C || 45);
 const WEB_PORT = Number(process.env.WEB_PORT || (process.env.NODE_ENV === 'production' ? 80 : 3000));
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const UI_PATH = path.join(__dirname, 'public', 'index.html');
@@ -27,7 +28,7 @@ const historyStore = new HistoryStore();
 
 const DEFAULT_CONFIG = {
     p1Ip: process.env.P1_IP || '192.168.1.171',
-    temperatureSensorEnabled: process.env.TEMP_SENSOR_ENABLED !== '0',
+    temperatureSensorEnabled: process.env.TEMP_SENSOR_ENABLED === '1',
     temperatureSensorId: process.env.TEMP_SENSOR_ID || null,
     oneWireBasePath: process.env.ONE_WIRE_BASE_PATH || '/sys/bus/w1/devices',
     heaterSensorEnabled: process.env.HEATER_SENSOR_ENABLED === '1',
@@ -37,6 +38,7 @@ const DEFAULT_CONFIG = {
     ads1115Address: Number(process.env.ADS1115_ADDRESS || 0x48),
     ads1115Channel: Number(process.env.ADS1115_CHANNEL || 0),
     sctMilliVoltsPerAmp: Number(process.env.SCT_MV_PER_AMP || 10),
+    maxTemperatureC: Number(process.env.TEMP_MAX_C || 45),
     exportThresholdW: Number(process.env.EXPORT_THRESHOLD_W || 1500),
     importThresholdW: Number(process.env.IMPORT_THRESHOLD_W || 1500),
 };
@@ -56,6 +58,30 @@ const runtimeState = {
     temperatureSensorAvailable: false,
     temperatureSensorReason: 'Niet geinitialiseerd.',
 };
+
+function formatErrorMessage(error) {
+    if (!error) {
+        return 'Onbekende fout';
+    }
+
+    if (typeof error === 'string') {
+        return error;
+    }
+
+    if (error instanceof Error) {
+        return error.message;
+    }
+
+    if (typeof error.message === 'string') {
+        return error.message;
+    }
+
+    try {
+        return JSON.stringify(error);
+    } catch (_unused) {
+        return String(error);
+    }
+}
 
 function isValidIpAddress(ip) {
     const parts = String(ip || '').trim().split('.');
@@ -163,6 +189,21 @@ function getRelayModeLabel() {
     return runtimeState.relayControlMode === 'manual' ? 'Handmatig' : 'Automatisch';
 }
 
+function getMaxTemperatureC() {
+    return Number(config.maxTemperatureC ?? DEFAULT_MAX_TEMPERATURE_C);
+}
+
+function isTemperatureLimitReached() {
+    const temperatureC = runtimeState.temperatureC;
+    const maxTemperatureC = getMaxTemperatureC();
+
+    return Number.isFinite(temperatureC) && Number.isFinite(maxTemperatureC) && temperatureC >= maxTemperatureC;
+}
+
+function getTemperatureLimitReason() {
+    return `Maximale temperatuur bereikt (${runtimeState.temperatureC?.toFixed?.(1) ?? runtimeState.temperatureC}°C >= ${getMaxTemperatureC().toFixed(1)}°C). De extra verwarming wordt gepauzeerd.`;
+}
+
 async function updateHeaterTelemetry() {
     const sensorReading = await heaterSensor.read();
     runtimeState.heaterSensorAvailable = Boolean(sensorReading.available);
@@ -184,6 +225,17 @@ async function checkSolarSurplus() {
     await updateHeaterTelemetry();
 
     try {
+        if (isTemperatureLimitReached()) {
+            if (!runtimeState.relayEnabled) {
+                await setRelayState(true, getTemperatureLimitReason());
+            }
+
+            runtimeState.lastCheckAt = new Date().toISOString();
+            runtimeState.lastError = null;
+            await logMeasurement('temperature_limit');
+            return;
+        }
+
         // 1. Lees de HomeWizard P1 meter uit
         const response = await axios.get(`http://${config.p1Ip}/api/v1/data`, { timeout: 5000 });
         const activePower = response.data.active_power_w;
@@ -269,6 +321,7 @@ function getStatusPayload() {
         temperatureC: runtimeState.temperatureC,
         temperatureSensorAvailable: runtimeState.temperatureSensorAvailable,
         temperatureSensorReason: runtimeState.temperatureSensorReason,
+        maxTemperatureC: config.maxTemperatureC ?? DEFAULT_MAX_TEMPERATURE_C,
         p1Ip: config.p1Ip,
         exportThresholdW: config.exportThresholdW ?? DEFAULT_EXPORT_THRESHOLD_W,
         importThresholdW: config.importThresholdW ?? DEFAULT_IMPORT_THRESHOLD_W,
@@ -319,6 +372,7 @@ const server = http.createServer(async (req, res) => {
                 ads1115I2cBus: config.ads1115I2cBus,
                 ads1115Address: config.ads1115Address,
                 ads1115Channel: config.ads1115Channel,
+                maxTemperatureC: config.maxTemperatureC ?? DEFAULT_MAX_TEMPERATURE_C,
                 exportThresholdW: config.exportThresholdW ?? DEFAULT_EXPORT_THRESHOLD_W,
                 importThresholdW: config.importThresholdW ?? DEFAULT_IMPORT_THRESHOLD_W,
             });
@@ -350,6 +404,13 @@ const server = http.createServer(async (req, res) => {
                 }
 
                 runtimeState.relayControlMode = 'manual';
+
+                if (payload.relayEnabled === false && isTemperatureLimitReached()) {
+                    await setRelayState(true, getTemperatureLimitReason());
+                    sendJson(res, 409, { error: getTemperatureLimitReason(), ...getStatusPayload() });
+                    return;
+                }
+
                 await setRelayState(payload.relayEnabled, payload.relayEnabled
                     ? 'Handmatige bediening: extra verwarming gepauzeerd.'
                     : 'Handmatige bediening: extra verwarming geforceerd actief.');
@@ -366,6 +427,7 @@ const server = http.createServer(async (req, res) => {
             const rawBody = await readRequestBody(req);
             const payload = JSON.parse(rawBody || '{}');
             const nextIp = String(payload.p1Ip || '').trim();
+            const nextMaxTemperatureC = Number(payload.maxTemperatureC);
             const nextExportThresholdW = Number(payload.exportThresholdW);
             const nextImportThresholdW = Number(payload.importThresholdW);
 
@@ -374,7 +436,7 @@ const server = http.createServer(async (req, res) => {
                 return;
             }
 
-            if (!Number.isFinite(nextExportThresholdW) || !Number.isFinite(nextImportThresholdW)) {
+            if (!Number.isFinite(nextMaxTemperatureC) || !Number.isFinite(nextExportThresholdW) || !Number.isFinite(nextImportThresholdW)) {
                 sendJson(res, 400, { error: 'Ongeldige drempelwaarden.' });
                 return;
             }
@@ -382,13 +444,14 @@ const server = http.createServer(async (req, res) => {
             config = {
                 ...config,
                 p1Ip: nextIp,
+                maxTemperatureC: nextMaxTemperatureC,
                 exportThresholdW: nextExportThresholdW,
                 importThresholdW: nextImportThresholdW,
             };
 
             saveConfig(config);
             await checkSolarSurplus();
-            sendJson(res, 200, { ok: true, p1Ip: config.p1Ip, exportThresholdW: config.exportThresholdW, importThresholdW: config.importThresholdW });
+            sendJson(res, 200, { ok: true, p1Ip: config.p1Ip, maxTemperatureC: config.maxTemperatureC, exportThresholdW: config.exportThresholdW, importThresholdW: config.importThresholdW });
             return;
         }
 
@@ -446,21 +509,41 @@ async function startApp() {
         console.log(`Temperatuursensor inactief: ${runtimeState.temperatureSensorReason}`);
     }
 
-    await checkSolarSurplus();
+    server.listen(WEB_PORT, '0.0.0.0', () => {
+        console.log(`Web UI beschikbaar op http://0.0.0.0:${WEB_PORT}`);
+    });
+
     setInterval(() => {
         checkSolarSurplus().catch((error) => {
-            console.error('Onverwachte fout in meetloop:', error.message);
+            const message = formatErrorMessage(error);
+            runtimeState.lastError = message;
+            console.error('Onverwachte fout in meetloop:', message);
         });
     }, CHECK_INTERVAL);
 
-    server.listen(WEB_PORT, '0.0.0.0', () => {
-        console.log(`Web UI beschikbaar op http://0.0.0.0:${WEB_PORT}`);
+    checkSolarSurplus().catch((error) => {
+        const message = formatErrorMessage(error);
+        runtimeState.lastError = message;
+        console.error('Eerste meetronde mislukt, service blijft actief:', message);
     });
 }
 
 startApp().catch((error) => {
-    console.error('Startup mislukt:', error.message);
+    console.error('Startup mislukt:', formatErrorMessage(error));
     process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled rejection:', formatErrorMessage(reason));
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught exception:', formatErrorMessage(error));
+    process.exit(1);
+});
+
+process.on('exit', (code) => {
+    console.log(`Process exit met code ${code}`);
 });
 
 // Netjes afsluiten als het script stopt

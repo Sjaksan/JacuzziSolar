@@ -1,6 +1,8 @@
 {
   "p1Ip": "192.168.1.170",
-  "heaterSensorEnabled": false,
+  "temperatureSensorEnabled": true,
+  "heaterSensorEnabled": true,
+  "maxTemperatureC": 45,
   "heaterCurrentThresholdA": 1,
   "lineVoltageV": 230,
   "ads1115I2cBus": 1,

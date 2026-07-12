@@ -32,6 +32,12 @@ class TemperatureSensor {
       const basePath = String(this.options.basePath || '').trim() || DEFAULT_OPTIONS.basePath;
       const requestedId = this.options.sensorId ? String(this.options.sensorId).trim() : null;
 
+      if (!fs.existsSync(basePath)) {
+        this.available = false;
+        this.reason = `1-wire pad ontbreekt: ${basePath}. Zet 1-wire aan op de Pi en herstart.`;
+        return;
+      }
+
       let deviceDir = null;
       if (requestedId) {
         const candidate = path.join(basePath, requestedId);
@@ -43,7 +49,7 @@ class TemperatureSensor {
       if (!deviceDir) {
         const entries = fs.readdirSync(basePath, { withFileTypes: true });
         const sensorEntry = entries.find(
-          (entry) => entry.isDirectory() && /^(28|10)-[0-9a-f]+$/i.test(entry.name)
+          (entry) => /^(28|10)-[0-9a-f]+$/i.test(entry.name)
         );
 
         if (sensorEntry) {
@@ -52,8 +58,15 @@ class TemperatureSensor {
       }
 
       if (!deviceDir) {
+        const entries = fs.readdirSync(basePath, { withFileTypes: true });
+        const visibleDevices = entries
+          .map((entry) => entry.name)
+          .join(', ');
+
         this.available = false;
-        this.reason = 'Geen 1-wire temperatuursensor gevonden.';
+        this.reason = visibleDevices
+          ? `Geen 1-wire temperatuursensor gevonden in ${basePath}. Gevonden: ${visibleDevices}.`
+          : `Geen 1-wire temperatuursensor gevonden in ${basePath}.`;
         return;
       }
 
@@ -74,6 +87,10 @@ class TemperatureSensor {
   }
 
   async read() {
+    if (!this.available || !this.deviceFile) {
+      await this.init();
+    }
+
     if (!this.available || !this.deviceFile) {
       return {
         available: false,

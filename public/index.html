@@ -41,7 +41,7 @@
     }
 
     .shell {
-      max-width: 900px;
+      max-width: 1400px;
       margin: 0 auto;
       display: grid;
       gap: 18px;
@@ -69,8 +69,14 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 14px;
+    }
+
+    @media (max-width: 1100px) {
+      .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
 
     .card {
@@ -249,6 +255,10 @@
     }
 
     @media (max-width: 560px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
       form {
         grid-template-columns: 1fr;
       }
@@ -290,6 +300,7 @@
         <p class="label">Temperatuur</p>
         <p class="value" id="temperatureValue">-</p>
         <p class="sub" id="temperatureSub">Actuele meting: -</p>
+        <p class="pill" id="temperatureLimitPill" style="margin-top: 10px; display: none;">Temperatuurgrens actief</p>
       </article>
     </section>
 
@@ -315,6 +326,8 @@
       <form id="settingsForm">
         <label for="p1Ip">P1 IP-adres</label>
         <input id="p1Ip" name="p1Ip" type="text" placeholder="Bijv. 192.168.1.171" required>
+        <label for="maxTemperatureC">Maximale temperatuur (°C)</label>
+        <input id="maxTemperatureC" name="maxTemperatureC" type="number" step="0.5" min="0" placeholder="45">
         <label for="exportThresholdW">Drempel voor zonnesurplus (W)</label>
         <input id="exportThresholdW" name="exportThresholdW" type="number" step="50" placeholder="-1500">
         <label for="importThresholdW">Drempel voor weinig zonnesurplus (W)</label>
@@ -339,11 +352,13 @@
     const heaterSub = document.getElementById('heaterSub');
     const temperatureValue = document.getElementById('temperatureValue');
     const temperatureSub = document.getElementById('temperatureSub');
+    const temperatureLimitPill = document.getElementById('temperatureLimitPill');
     const relayModeSub = document.getElementById('relayModeSub');
     const relayAutoButton = document.getElementById('relayAutoButton');
     const relayOnButton = document.getElementById('relayOnButton');
     const relayOffButton = document.getElementById('relayOffButton');
     const p1IpInput = document.getElementById('p1Ip');
+    const maxTemperatureCInput = document.getElementById('maxTemperatureC');
     const exportThresholdWInput = document.getElementById('exportThresholdW');
     const importThresholdWInput = document.getElementById('importThresholdW');
     const settingsForm = document.getElementById('settingsForm');
@@ -367,6 +382,7 @@
       }
       const data = await response.json();
       p1IpInput.value = data.p1Ip || '';
+      maxTemperatureCInput.value = data.maxTemperatureC ?? '';
       exportThresholdWInput.value = data.exportThresholdW ?? '';
       importThresholdWInput.value = data.importThresholdW ?? '';
     }
@@ -436,10 +452,19 @@
 
       if (data.temperatureSensorAvailable) {
         temperatureValue.textContent = formatTemperature(data.temperatureC);
-        temperatureSub.textContent = 'Actuele meting';
+        temperatureSub.textContent = 'Actuele meting' + (typeof data.maxTemperatureC === 'number' ? ' | Max: ' + data.maxTemperatureC.toFixed(1) + ' °C' : '');
+        if (typeof data.temperatureC === 'number' && typeof data.maxTemperatureC === 'number' && data.temperatureC >= data.maxTemperatureC) {
+          temperatureSub.textContent += ' | Verwarming gepauzeerd';
+          temperatureLimitPill.style.display = 'inline-flex';
+          temperatureLimitPill.className = 'pill on';
+        }
+        else {
+          temperatureLimitPill.style.display = 'none';
+        }
       } else {
         temperatureValue.textContent = 'N/A';
         temperatureSub.textContent = data.temperatureSensorReason || 'Sensor niet beschikbaar';
+        temperatureLimitPill.style.display = 'none';
       }
     }
 
@@ -595,6 +620,7 @@
           },
           body: JSON.stringify({
           p1Ip: p1IpInput.value.trim(),
+          maxTemperatureC: Number(maxTemperatureCInput.value),
           exportThresholdW: Number(exportThresholdWInput.value),
           importThresholdW: Number(importThresholdWInput.value)
         })

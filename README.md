@@ -62,6 +62,14 @@ ls /sys/bus/w1/devices
 - `TEMP_SENSOR_ID=28-xxxxxxxxxxxx` (specifieke sensor kiezen)
 - `ONE_WIRE_BASE_PATH=/sys/bus/w1/devices`
 
+## Maximale temperatuur
+
+De extra verwarming stopt automatisch zodra de ingestelde maximumtemperatuur is bereikt.
+
+- Standaard: `45` °C
+- Instelling in de webinterface: `Maximale temperatuur (°C)`
+- Environment variabele: `TEMP_MAX_C`
+
 ## Systemd service installeren
 
 Er staat een installscript in:
@@ -143,6 +151,86 @@ systemctl status jacuzzi-solar --no-pager
 journalctl -u jacuzzi-solar -n 100 --no-pager
 ```
 
+## Lokale one-command deploy (zonder GitHub pipeline)
+
+Voor deploy binnen je lokale netwerk staat er een script in:
+- `deploy-local.sh`
+
+Standaard gebruikt het:
+- host: `192.168.1.151`
+- user: `sjaksan`
+- remote app dir: `/opt/jacuzzi-solar`
+
+Run vanaf je projectmap:
+```bash
+./deploy-local.sh
+```
+
+Belangrijk:
+- Run dit script zonder `sudo`.
+- Bij eerste verbinding voegt het script de SSH host key automatisch toe.
+- Als de host key ooit verandert (bijv. na SD-card reflash), verwijder eerst de oude key:
+```bash
+ssh-keygen -R 192.168.1.151
+```
+
+Met eigen waarden:
+```bash
+./deploy-local.sh <pi_host> <pi_user> <remote_dir> <app_user> <app_group>
+```
+
+Voorbeeld:
+```bash
+./deploy-local.sh 192.168.1.151 sjaksan /opt/jacuzzi-solar sjaksan sjaksan
+```
+
+Opmerking over snelheid:
+- Eerste deploy kan nog traag zijn.
+- Daarna slaat `deploy/update-on-pi.sh` dependency-installatie over als `package-lock.json` niet gewijzigd is.
+- De deploy-cache staat op de Pi in `.deploy-state` en blijft nu behouden tussen deploys.
+
+Snelle deploy zonder npm stap (voor alleen code/UI wijzigingen):
+```bash
+SKIP_REMOTE_NPM_INSTALL=1 ./deploy-local.sh
+```
+
+Lage schijfruimte op Pi:
+- `deploy/update-on-pi.sh` gebruikt standaard npm cache in `/var/cache/jacuzzi-solar-npm` (op disk, niet in RAM).
+- Bij te weinig vrije ruimte stopt het script met een duidelijke melding.
+- Drempel is standaard 256MB vrij.
+
+Optioneel tunen:
+```bash
+# Andere cache locatie (bijv. usb of grotere partitie)
+ssh sjaksan@192.168.1.151 "sudo NPM_CACHE_DIR=/var/tmp/jacuzzi-npm-cache bash /opt/jacuzzi-solar/deploy/update-on-pi.sh /opt/jacuzzi-solar sjaksan sjaksan"
+
+# Vrije-ruimte drempel aanpassen (KB)
+ssh sjaksan@192.168.1.151 "sudo MIN_FREE_KB=131072 bash /opt/jacuzzi-solar/deploy/update-on-pi.sh /opt/jacuzzi-solar sjaksan sjaksan"
+```
+
+Zelfde tuning via lokaal deployscript:
+```bash
+REMOTE_NPM_CACHE_DIR=/var/tmp/jacuzzi-npm-cache ./deploy-local.sh
+REMOTE_MIN_FREE_KB=131072 ./deploy-local.sh
+```
+
+Force-opties bij troubleshooting:
+```bash
+FORCE_NPM_INSTALL=1 ./deploy-local.sh
+FORCE_SQLITE_REBUILD=1 ./deploy-local.sh
+```
+
+Waarom niet lokaal builden en dan syncen?
+- Native Node modules (zoals `sqlite3` en I2C-gerelateerde dependencies) zijn platform/architectuur-specifiek.
+- Build op x86 laptop werkt meestal niet op ARM Raspberry Pi.
+- Daarom: dependencies op de Pi bouwen en daarna snelle deploys doen met cache en `SKIP_REMOTE_NPM_INSTALL` wanneer mogelijk.
+
+Direct op de Pi met flags:
+```bash
+sudo bash /opt/jacuzzi-solar/deploy/update-on-pi.sh /opt/jacuzzi-solar sjaksan sjaksan --force-npm-install
+sudo bash /opt/jacuzzi-solar/deploy/update-on-pi.sh /opt/jacuzzi-solar sjaksan sjaksan --force-sqlite-rebuild
+```
+
 ## Belangrijke env variabelen
 
 - `WEB_PORT=3000`
@@ -154,6 +242,6 @@ journalctl -u jacuzzi-solar -n 100 --no-pager
 - `ADS1115_ADDRESS=72`
 - `ADS1115_CHANNEL=0`
 - `SCT_MV_PER_AMP=10`
-- `TEMP_SENSOR_ENABLED=1`
+- `TEMP_SENSOR_ENABLED=0`
 - `TEMP_SENSOR_ID=`
 - `ONE_WIRE_BASE_PATH=/sys/bus/w1/devices`
